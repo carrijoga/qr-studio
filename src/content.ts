@@ -85,9 +85,17 @@ export const MIN_CONTRAST = 3;
 
 const fmt = (n: number, digits = 1) => n.toLocaleString("pt-BR", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 
-export function printWarnings(g: QrGeometry, printCm: number, dotColor: string, bgColor: string): string[] {
+export function printWarnings(
+  g: QrGeometry,
+  printCm: number,
+  dotColor: string,
+  bgColor: string,
+  transparentBg = false,
+): string[] {
   const warnings: string[] = [];
-  if (!isDarkerThan(dotColor, bgColor)) {
+  if (transparentBg) {
+    warnings.push("Fundo transparente: aplique sobre uma superfície clara e lisa, com bom contraste com os módulos.");
+  } else if (!isDarkerThan(dotColor, bgColor)) {
     warnings.push("Módulos mais claros que o fundo: muitos leitores não reconhecem QR invertido.");
   } else {
     const ratio = contrastRatio(dotColor, bgColor);

@@ -24,6 +24,8 @@ export interface State {
   /** Last named preset picked; "Restaurar" returns the style to it. */
   basePreset: BasePresetId;
   style: Style;
+  /** Omit the background fill so PNG/SVG exports are transparent (independent of presets). */
+  transparentBg: boolean;
   /** Export resolution in px (square). */
   size: number;
   /** Outer margin as a percentage of the size. */
@@ -67,6 +69,7 @@ export const DEFAULT_STATE: State = {
   preset: "wedding",
   basePreset: "wedding",
   style: { ...PRESETS.wedding },
+  transparentBg: false,
   size: 2048,
   marginPct: 6,
   logoSize: 0.3,

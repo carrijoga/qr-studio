@@ -38,6 +38,9 @@ async function decodeFile(page: Page, bytes: Buffer, mime: string): Promise<Deco
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = side;
       const ctx = canvas.getContext("2d")!;
+      // Composite onto white, like printing a transparent code on paper.
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, side, side);
       ctx.drawImage(img, 0, 0, side, side);
       const { data } = ctx.getImageData(0, 0, side, side);
       const result = (window as any).jsQR(data, side, side);
@@ -69,7 +72,7 @@ async function pngVsSvgDiff(page: Page, png: Buffer, svg: Buffer, size: number):
       const b = await draw(`data:image/svg+xml;base64,${svg}`);
       let diff = 0;
       for (let i = 0; i < a.length; i += 4) {
-        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 24) diff++;
+        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) + Math.abs(a[i + 3] - b[i + 3]) > 24) diff++;
       }
       return diff / (size * size);
     },
@@ -222,6 +225,53 @@ test("Alertas de densidade, contraste e margem", async ({ page }) => {
   await setValue(page, "input[name=url]", "https://a.co");
   await page.locator("input[name=marginPct]").fill("2");
   await expect(warnings).toContainText("Margem de");
+});
+
+test("Fundo transparente: PNG com alpha, SVG sem fundo, preview quadriculado e persistência", async ({ page }) => {
+  const toggle = page.locator("input[name=transparentBg]");
+  expect((await exportFile(page, "svg")).bytes.toString()).toMatch(/clip-path-background-color/);
+
+  await toggle.check();
+  await expect(page.locator("#preview")).toHaveClass(/transparent/);
+  await expect(page.locator("input[name=bgColor]")).toBeDisabled();
+  await expect(page.locator("#warnings")).toContainText("Fundo transparente");
+  await expectExportsDecodeTo(page, DEFAULT_LINK);
+
+  const svg = (await exportFile(page, "svg")).bytes.toString();
+  expect(svg).not.toMatch(/clip-path-background-color/);
+  expect(svg).not.toMatch(/FAF9F5/i);
+  // The checkerboard is CSS on the container only; the preview SVG itself has no background either.
+  await expect(page.locator("#preview svg [id^=clip-path-background-color]")).toHaveCount(0);
+
+  const png = (await exportFile(page, "png")).bytes;
+  const alpha = await page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(img, 0, 0);
+    const corner = ctx.getImageData(5, 5, 1, 1).data[3];
+    const { data } = ctx.getImageData(0, 0, c.width, c.height);
+    let opaque = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] === 255) opaque++;
+    return { corner, opaque };
+  }, png.toString("base64"));
+  expect(alpha.corner).toBe(0); // quiet zone is kept, but transparent
+  expect(alpha.opaque).toBeGreaterThan(0); // modules are still drawn
+
+  await page.reload();
+  await expect(toggle).toBeChecked();
+  await expect(page.locator("#preview")).toHaveClass(/transparent/);
+
+  // Presets don't touch it; turning it off restores the background.
+  await page.check('input[name=preset][value=minimal]', { force: true });
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await expect(page.locator("#preview")).not.toHaveClass(/transparent/);
+  expect((await exportFile(page, "svg")).bytes.toString()).toMatch(/clip-path-background-color/);
 });
 
 test("Conteúdo longo demais bloqueia a exportação", async ({ page }) => {

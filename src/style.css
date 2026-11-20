@@ -388,6 +388,27 @@ input[type="range"] {
   font: 13px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 
+label.color:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--sage-deep);
+  cursor: pointer;
+}
+
 /* ---------- Logo ---------- */
 
 .logo-row {
@@ -685,6 +706,18 @@ h3 {
 .paper img.stale {
   opacity: 0.35;
   filter: grayscale(1);
+}
+
+/* Preview-only checkerboard showing transparency; it is CSS, never part of the exported file. */
+.preview.transparent,
+.paper img.transparent {
+  background-color: #fff;
+  background-image: conic-gradient(#ecebe6 25%, transparent 0 50%, #ecebe6 0 75%, transparent 0);
+  background-size: 16px 16px;
+}
+
+.paper img.transparent {
+  background-size: 6px 6px;
 }
 
 /* ---------- Responsive ---------- */

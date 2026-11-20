@@ -21,6 +21,8 @@ const logoLabel = $<HTMLSpanElement>("#logo-label");
 const logoRemove = $<HTMLButtonElement>("#logo-remove");
 const presetReset = $<HTMLButtonElement>("#preset-reset");
 const eclSelect = form.elements.namedItem("ecl") as HTMLSelectElement;
+const transparentInput = form.elements.namedItem("transparentBg") as HTMLInputElement;
+const bgColorInput = form.elements.namedItem("bgColor") as HTMLInputElement;
 const buttons = {
   png: $<HTMLButtonElement>("#dl-png"),
   svg: $<HTMLButtonElement>("#dl-svg"),
@@ -63,6 +65,7 @@ function hydrateForm() {
     setField(key, state[key]);
   for (const key of STYLE_KEYS) setField(key, state.style[key]);
   fileNameInput.value = state.fileName;
+  transparentInput.checked = state.transparentBg;
 }
 
 function onInput(e: Event) {
@@ -80,6 +83,8 @@ function onInput(e: Event) {
     (state.style as unknown as Record<string, string>)[name] = el.value;
     state.preset = "custom";
     setField("preset", "custom");
+  } else if (name === "transparentBg") {
+    state.transparentBg = el.checked;
   } else if (name === "fileName") {
     state.fileName = el.value;
     saveState(state);
@@ -121,7 +126,8 @@ function buildOptions(data: string, style: Style): Partial<Options> {
     dotsOptions: { type: style.dotType, color: style.dotColor },
     cornersSquareOptions: { type: style.cornerSquareType, color: style.dotColor },
     cornersDotOptions: { type: style.cornerDotType, color: style.dotColor },
-    backgroundOptions: { color: style.bgColor },
+    // An empty color makes qr-code-styling skip the background <rect>; the margin stays as empty space.
+    backgroundOptions: { color: state.transparentBg ? "" : style.bgColor },
   };
 }
 
@@ -207,7 +213,7 @@ function render() {
     `Módulo de ${g.moduleMm.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} mm · ` +
     `${Math.round(state.size / (state.printCm / 2.54))} dpi neste tamanho. A escala na tela é aproximada.`;
 
-  const warnings = printWarnings(g, state.printCm, state.style.dotColor, state.style.bgColor);
+  const warnings = printWarnings(g, state.printCm, state.style.dotColor, state.style.bgColor, state.transparentBg);
   if (logoNotice) warnings.push(logoNotice);
   warningsEl.replaceChildren(
     ...warnings.map((w) => {
@@ -252,6 +258,9 @@ function syncUi() {
   const name = PRESET_NAMES[state.basePreset];
   presetReset.textContent = `Restaurar ${name}`;
   presetReset.disabled = state.preset === state.basePreset;
+  preview.classList.toggle("transparent", state.transparentBg);
+  printImg.classList.toggle("transparent", state.transparentBg);
+  bgColorInput.disabled = state.transparentBg;
   printImg.style.width = printImg.style.height = `${state.printCm}cm`;
 }
 
