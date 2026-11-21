@@ -2,7 +2,8 @@ import QRCodeStyling, { type Options } from "qr-code-styling";
 import "./style.css";
 import { buildContent, geometry, printWarnings } from "./content";
 import { loadLogo, optimizeLogo, saveLogo, type Logo } from "./logo";
-import { PRESETS, loadState, saveState, type State, type Style } from "./state";
+import { buildShareUrl, clearShareHash, hasSharedHash, readShareHash, type Shared } from "./share";
+import { PRESETS, hasSavedState, loadState, saveState, type State, type Style } from "./state";
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -28,6 +29,7 @@ const buttons = {
   svg: $<HTMLButtonElement>("#dl-svg"),
   copy: $<HTMLButtonElement>("#copy"),
   test: $<HTMLButtonElement>("#test"),
+  share: $<HTMLButtonElement>("#share"),
 };
 
 const STYLE_KEYS = ["dotColor", "bgColor", "dotType", "cornerSquareType", "cornerDotType"] as const;
@@ -365,11 +367,65 @@ buttons.test.addEventListener("click", () => {
   if (currentLink) window.open(currentLink, "_blank", "noopener,noreferrer");
 });
 
+/* ---------- Share link ---------- */
+
+/** Above this, some chat apps may truncate the link (only happens with a logo). */
+const LONG_LINK_CHARS = 8000;
+
+buttons.share.addEventListener("click", async () => {
+  if (renderQueued) render();
+  const label = buttons.share.textContent;
+  buttons.share.disabled = true;
+  try {
+    const url = await buildShareUrl(state, logo);
+    await navigator.clipboard.writeText(url);
+    buttons.share.textContent = "Link copiado ✓";
+    setTimeout(() => (buttons.share.textContent = label), 1400);
+    if (url.length > LONG_LINK_CHARS)
+      setStatus(
+        `Link copiado (${Math.round(url.length / 1024)} KB, inclui o logo). Alguns apps de mensagem cortam links longos.`,
+        "warn",
+      );
+  } catch {
+    setStatus("Não foi possível gerar ou copiar o link de compartilhamento.", "error");
+  } finally {
+    buttons.share.disabled = false;
+  }
+});
+
+function sameAsCurrent(shared: Shared): boolean {
+  return JSON.stringify(shared.state) === JSON.stringify(state) && shared.logo?.data === logo?.data;
+}
+
+/** Applies a #s=… link. Asks first when it would replace a different saved configuration. */
+async function openSharedLink(hasOwnConfig: boolean): Promise<void> {
+  if (!hasSharedHash()) return;
+  const shared = await readShareHash();
+  clearShareHash();
+  if (!shared) {
+    setStatus("Link de compartilhamento inválido ou corrompido.", "error");
+    return;
+  }
+  if (sameAsCurrent(shared)) return;
+  if (hasOwnConfig && !confirm("Este link traz um QR Code compartilhado. Substituir as configurações salvas neste navegador?"))
+    return;
+  Object.assign(state, shared.state);
+  logo = shared.logo;
+  logoNotice = saveLogo(logo) ? null : "Logo em uso, mas não foi salvo: armazenamento do navegador cheio.";
+  hydrateForm();
+  render();
+}
+
 /* ---------- Boot ---------- */
 
 form.addEventListener("input", onInput);
 previewCard.addEventListener("input", onInput);
 form.addEventListener("submit", (e) => e.preventDefault());
+// Pasting a shared link into a tab that already has the app open only changes the hash.
+window.addEventListener("hashchange", () => void openSharedLink(true));
 
+// Checked before the first render, which saves the defaults.
+const hadSavedConfig = hasSavedState();
 hydrateForm();
 render();
+void openSharedLink(hadSavedConfig);

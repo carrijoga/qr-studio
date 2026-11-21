@@ -281,3 +281,117 @@ test("Conteúdo longo demais bloqueia a exportação", async ({ page }) => {
   await expect(page.locator("#dl-png")).toBeDisabled();
   await expect(page.locator("#dl-svg")).toBeDisabled();
 });
+
+/* ---------- Share links ---------- */
+
+/** Clicks "Compartilhar link" and returns the URL it copied. */
+async function copyShareLink(page: Page): Promise<string> {
+  await page.evaluate(() => {
+    (window as any).__copied = null;
+    navigator.clipboard.writeText = async (t: string) => void ((window as any).__copied = t);
+  });
+  await page.click("#share");
+  await page.waitForFunction(() => (window as any).__copied);
+  return page.evaluate(() => (window as any).__copied as string);
+}
+
+/** Builds a #s=… link from an arbitrary payload, as an attacker could. */
+async function craftLink(page: Page, payload: unknown): Promise<string> {
+  return page.evaluate(async (payload) => {
+    const json = new TextEncoder().encode(JSON.stringify(payload));
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${location.origin}/#s=${b64}`;
+  }, payload);
+}
+
+test("Link compartilhado restaura tudo em outro dispositivo, inclusive logo e transparência", async ({ page, browser }) => {
+  const text = "Compartilhado ✓ 💚";
+  await page.check('input[name=contentType][value=text]', { force: true });
+  await setValue(page, "textarea[name=text]", text);
+  await page.locator("input[name=dotColor]").fill("#224466");
+  await page.check('input[name=dotType][value=classy]', { force: true });
+  await page.locator("input[name=transparentBg]").check();
+  await page.locator("input[name=size]").fill("1024");
+  await page.fill("#fileName", "convite");
+  await page.setInputFiles("input[name=logo]", { name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(LOGO_SVG) });
+  await expect(page.locator("#logo-remove")).toBeVisible();
+  const link = await copyShareLink(page);
+  expect(link).toMatch(/#s=[A-Za-z0-9_-]+$/);
+
+  // A brand-new browser profile: no saved state, so it loads without asking.
+  const other = await (await browser.newContext()).newPage();
+  other.on("dialog", () => {
+    throw new Error("não deveria perguntar num navegador sem configurações");
+  });
+  await other.goto(link);
+  await expect(other.locator('input[name=contentType][value=text]')).toBeChecked();
+  await expect(other.locator("textarea[name=text]")).toHaveValue(text);
+  await expect(other.locator("input[name=dotColor]")).toHaveValue("#224466");
+  await expect(other.locator('input[name=dotType][value=classy]')).toBeChecked();
+  await expect(other.locator("input[name=transparentBg]")).toBeChecked();
+  await expect(other.locator("#fileName")).toHaveValue("convite");
+  await expect(other.locator("#logo-label")).toHaveText("logo.svg");
+  expect(new URL(other.url()).hash).toBe("");
+
+  const svg = await exportFile(other, "svg");
+  expect(svg.name).toBe("convite.svg");
+  expect(svg.bytes.toString()).toContain("<image");
+  expect(svg.bytes.toString()).not.toMatch(/clip-path-background-color/);
+  await expectExportsDecodeTo(other, text, 1024);
+
+  // Persisted in the new browser too.
+  await other.reload();
+  await expect(other.locator("textarea[name=text]")).toHaveValue(text);
+  await expect(other.locator("#logo-label")).toHaveText("logo.svg");
+});
+
+test("Abrir link com configurações já salvas pergunta antes de substituir", async ({ page }) => {
+  await page.check('input[name=contentType][value=url]', { force: true });
+  await setValue(page, "input[name=url]", "https://meu.site");
+  await expect(page.locator("#status")).toHaveText(/Pronto/);
+  const mine = await copyShareLink(page);
+
+  await page.check('input[name=contentType][value=text]', { force: true });
+  await setValue(page, "textarea[name=text]", "outro");
+  await expect(page.locator("#status")).toHaveText(/Pronto/);
+
+  page.once("dialog", (d) => d.dismiss());
+  await page.goto(mine);
+  await expect(page.locator("textarea[name=text]")).toHaveValue("outro");
+  await expect(page.locator('input[name=contentType][value=text]')).toBeChecked();
+
+  page.once("dialog", (d) => d.accept());
+  await page.goto(mine);
+  await expect(page.locator('input[name=contentType][value=url]')).toBeChecked();
+  await expect(page.locator("input[name=url]")).toHaveValue("https://meu.site");
+  expect(new URL(page.url()).hash).toBe("");
+});
+
+test("Link adulterado ou corrompido não injeta valores inválidos", async ({ page }) => {
+  const evil = await craftLink(page, {
+    v: 1,
+    state: {
+      contentType: "evil",
+      text: "ok",
+      size: 999999,
+      marginPct: "5",
+      transparentBg: "yes",
+      style: { dotColor: "red;background:url(x)", bgColor: "#123456", dotType: "<script>" },
+    },
+    logo: { name: "x", data: "javascript:alert(1)" },
+  });
+  page.on("dialog", (d) => d.accept());
+  await page.goto(evil);
+  await expect(page.locator("input[name=bgColor]")).toHaveValue("#123456");
+  await expect(page.locator('input[name=contentType][value=whatsapp]')).toBeChecked();
+  await expect(page.locator("input[name=dotColor]")).toHaveValue("#627a61");
+  await expect(page.locator("input[name=size]")).toHaveValue("2048");
+  await expect(page.locator("input[name=transparentBg]")).not.toBeChecked();
+  await expect(page.locator("#logo-remove")).toBeHidden();
+
+  await page.goto("/#s=isto-nao-e-valido");
+  await expect(page.locator("#status")).toContainText("Link de compartilhamento inválido");
+  await expect(page.locator("input[name=bgColor]")).toHaveValue("#123456");
+});

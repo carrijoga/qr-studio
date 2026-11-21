@@ -80,16 +80,63 @@ export const DEFAULT_STATE: State = {
 
 const STORAGE_KEY = "qr-studio:v1";
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const ENUMS: Partial<Record<keyof State, readonly unknown[]>> = {
+  contentType: ["url", "whatsapp", "text"],
+  preset: ["wedding", "minimal", "custom"],
+  basePreset: ["wedding", "minimal"],
+  ecl: ["L", "M", "Q", "H"],
+  printCm: PRINT_SIZES_CM,
+};
+const STYLE_ENUMS: Record<Exclude<keyof Style, "dotColor" | "bgColor">, readonly string[]> = {
+  dotType: ["square", "dots", "rounded", "extra-rounded", "classy"],
+  cornerSquareType: ["square", "rounded", "extra-rounded", "dot"],
+  cornerDotType: ["square", "rounded", "dot"],
+};
+/** Same limits as the form controls. */
+const RANGES: Partial<Record<keyof State, [number, number]>> = {
+  size: [512, 4096],
+  marginPct: [2, 15],
+  logoSize: [0.15, 0.4],
+};
+
+/**
+ * Builds a complete State from untrusted data (localStorage or a shared link):
+ * keeps only known keys with the right type and allowed values, falling back to defaults.
+ */
+export function sanitizeState(input: unknown): State {
+  const src = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const out = structuredClone(DEFAULT_STATE) as unknown as Record<string, unknown>;
+  for (const key of Object.keys(DEFAULT_STATE) as (keyof State)[]) {
+    if (key === "style") continue;
+    const value = src[key];
+    if (typeof value !== typeof DEFAULT_STATE[key]) continue;
+    if (ENUMS[key] && !ENUMS[key]!.includes(value)) continue;
+    const range = RANGES[key];
+    if (range && !(Number.isFinite(value) && (value as number) >= range[0] && (value as number) <= range[1])) continue;
+    out[key] = value;
+  }
+  const style = (src.style && typeof src.style === "object" ? src.style : {}) as Record<string, unknown>;
+  const outStyle = out.style as Record<string, unknown>;
+  for (const key of ["dotColor", "bgColor"] as const)
+    if (typeof style[key] === "string" && HEX_COLOR.test(style[key] as string)) outStyle[key] = style[key];
+  for (const [key, allowed] of Object.entries(STYLE_ENUMS))
+    if (allowed.includes(style[key] as string)) outStyle[key] = style[key];
+  return out as unknown as State;
+}
+
+export function hasSavedState(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function loadState(): State {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_STATE);
-    const saved = JSON.parse(raw) as Partial<State>;
-    return {
-      ...DEFAULT_STATE,
-      ...saved,
-      style: { ...DEFAULT_STATE.style, ...saved.style },
-    };
+    return raw ? sanitizeState(JSON.parse(raw)) : structuredClone(DEFAULT_STATE);
   } catch {
     return structuredClone(DEFAULT_STATE);
   }

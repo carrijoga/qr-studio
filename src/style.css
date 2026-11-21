@@ -573,6 +573,10 @@ button:focus-visible {
   grid-template-columns: 1fr;
 }
 
+.actions .share {
+  grid-column: 1 / -1;
+}
+
 /* ---------- Card head / preset reset ---------- */
 
 .card-head {
